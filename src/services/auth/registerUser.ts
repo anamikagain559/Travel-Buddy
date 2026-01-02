@@ -4,9 +4,11 @@
 import { serverFetch } from "@/lib/server-fetch";
 import { zodValidator } from "@/lib/zodValidator";
 import { registerUserValidationZodSchema } from "@/zod/auth.validation";
+import { loginUser } from "./loginUser";
 
-export const registerUser = async (_state: any, formData: FormData) => {
+export const registerUser = async (_currentState: any, formData: any): Promise<any> => {
   try {
+    // 1️⃣ Prepare payload from formData
     const payload = {
       name: formData.get("name"),
       address: formData.get("address"),
@@ -15,62 +17,50 @@ export const registerUser = async (_state: any, formData: FormData) => {
       confirmPassword: formData.get("confirmPassword"),
     };
 
-
-
-const validation = zodValidator(payload, registerUserValidationZodSchema);
-
-if (!validation.success || !validation.data) {
-  return {
-    success: false,
-    errors: validation.errors,
-    message: "Validation failed",
-  };
-}
-
-const data = validation.data; // ✅ safe now
-
-// Now TypeScript knows `data` is defined
-const registerData = {
-  password: validation.data.password,
-  patient: {
-    name: validation.data.name,
-    address: validation.data.address,
-    email: validation.data.email,
-  },
-};
-
-    const newFormData = new FormData();
-    newFormData.append("data", JSON.stringify(registerData));
-
-    if (formData.get("file")) {
-      newFormData.append("file", formData.get("file") as Blob);
+    // 2️⃣ Validate payload
+    const validation = zodValidator(payload, registerUserValidationZodSchema);
+    if (!validation.success) {
+      return validation; // return validation errors
     }
 
+    const validatedPayload: any = validation.data;
+
+    // 3️⃣ Prepare data to send to backend
+    const registerData = {
+      name: validatedPayload.name,
+      address: validatedPayload.address,
+      email: validatedPayload.email,
+      password: validatedPayload.password,
+    };
+
+    // 4️⃣ Send JSON request (no FormData)
     const res = await serverFetch.post("/user/register", {
-      body: newFormData,
+      body: JSON.stringify(registerData),
+      headers: {
+        "Content-Type": "application/json", // important
+      },
     });
 
     const result = await res.json();
 
-    if (!res.ok || !result.success) {
-      return {
-        success: false,
-        message: result.message || "Registration failed",
-      };
+    // 5️⃣ Auto-login after successful registration
+    if (result.success) {
+      await loginUser(_currentState, formData);
     }
 
-    // ✅ JUST RETURN — no login, no redirect
-    return {
-      success: true,
-      message: "Account created successfully",
-    };
+    return result;
+
   } catch (error: any) {
+    if (error?.digest?.startsWith("NEXT_REDIRECT")) {
+      throw error;
+    }
+    console.log(error);
     return {
       success: false,
       message:
         process.env.NODE_ENV === "development"
           ? error.message
-          : "Registration failed",
+          : "Registration Failed. Please try again.",
     };
   }
 };
